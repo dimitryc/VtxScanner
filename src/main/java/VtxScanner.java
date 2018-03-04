@@ -6,9 +6,9 @@ import javafx.scene.Scene;
 import javafx.scene.chart.LineChart;
 import javafx.scene.chart.NumberAxis;
 import javafx.scene.chart.XYChart;
-import javafx.scene.control.TextField;
-import javafx.scene.control.ToggleButton;
+import javafx.scene.control.*;
 import javafx.scene.input.KeyCode;
+import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 
@@ -32,9 +32,6 @@ public class VtxScanner extends Application {
     private static void parseArgs(String[] args) {
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
-                case "-p":
-                    port = args[++i];
-                    break;
                 case "-baudRate":
                     baudRate = Integer.parseInt(args[++i]);
                     break;
@@ -45,11 +42,6 @@ public class VtxScanner extends Application {
                     System.err.println("Invalid param: " + args[i]);
                     System.exit(1);
             }
-        }
-
-        if (port == null) {
-            System.err.println("Usage: java -jar VtxScanner.jar -p port");
-            System.exit(1);
         }
     }
 
@@ -69,6 +61,7 @@ public class VtxScanner extends Application {
         Platform.runLater(() -> {
             updateMainLine(freq, rssi);
             updateVerticalLine(freq, rssi);
+            updateLabels(freq, rssi);
         });
     }
 
@@ -103,16 +96,22 @@ public class VtxScanner extends Application {
         }
     }
 
+    private static int currentFreq = 0;
+
+    private static void updateLabels(int freqValue, int rssiValue) {
+        if (freqValue != currentFreq) {
+            textField.setText(Integer.toString(freqValue));
+            currentFreq = freqValue;
+        }
+        rssiLabel.setText("Rssi="+Integer.toString(rssiValue));
+    }
+
     public void start(Stage primaryStage) {
         List<String> args = getParameters().getRaw();
         parseArgs(args.toArray(new String[args.size()]));
 
-        initSerial();
-
         initUI(primaryStage);
     }
-
-    private SerialWriter writer;
 
     public static int MIN_FREQ = 5600;
     public static int MAX_FREQ = 6000;
@@ -126,21 +125,79 @@ public class VtxScanner extends Application {
 
         series1.setName("Frequency");
         series2.setName("Current");
+
         lineChart.getData().add(series1);
         lineChart.getData().add(series2);
 
-        final ToggleButton stopButton = new ToggleButton("Scan");
-        stopButton.setOnAction(event -> {
-            if (stopButton.isSelected()) {
-                stopButton.setText("Stop");
-                writer.resume();
+        HBox controlBox = initControlBox();
+        controlBox.setDisable(true);
+        HBox connectBox = initConnectBox(controlBox);
+
+        rssiLabel = new Label();
+
+        VBox vbox = new VBox();
+        vbox.getChildren().addAll(lineChart, connectBox, controlBox, rssiLabel);
+
+        Scene scene = new Scene(vbox, 800, 450);
+        scene.getStylesheets().add("style.css");
+
+        primaryStage.setTitle("VtxScanner");
+        primaryStage.setScene(scene);
+        primaryStage.show();
+    }
+
+    private static Label rssiLabel;
+    private static TextField textField;
+
+    private HBox initConnectBox(HBox controlBox) {
+        HBox hbox = new HBox();
+        final ToggleButton connectButton = new ToggleButton("Connect");
+        connectButton.setOnAction(event -> {
+            if (connectButton.isSelected()) {
+                new Thread(this::connect).start();
+                connectButton.setText("Disconnect");
+                controlBox.setDisable(false);
             } else {
-                stopButton.setText("Scan");
-                writer.stop();
+                new Thread(this::disconnect).start();
+                connectButton.setText("Connect");
+                controlBox.setDisable(true);
             }
         });
 
-        final TextField textField = new TextField();
+        final ComboBox<String> portsCompobox = new ComboBox<>();
+        portsCompobox.getItems().addAll(NRSerialPort.getAvailableSerialPorts());
+        portsCompobox.getSelectionModel().select(0);
+        port = portsCompobox.getSelectionModel().getSelectedItem();
+
+        portsCompobox.setOnAction(event ->
+                port = portsCompobox.getSelectionModel().getSelectedItem());
+
+        hbox.getChildren().addAll(connectButton, portsCompobox);
+
+        return hbox;
+    }
+
+    private HBox initControlBox() {
+        HBox hbox = new HBox();
+
+        final ToggleButton scanButton = new ToggleButton("Scan");
+        scanButton.setOnAction(event -> {
+            if (scanButton.isSelected()) {
+                writer.scan(true);
+                scanButton.setText("Stop");
+            } else {
+                writer.scan(false);
+                scanButton.setText("Scan");
+            }
+        });
+
+        final Button leftButton = new Button("Left");
+        leftButton.setOnAction(event -> writer.left());
+
+        final Button rightButton = new Button("Right");
+        rightButton.setOnAction(event -> writer.right());
+
+        textField = new TextField();
         textField.setOnKeyPressed(event -> {
             if (event.getCode().equals(KeyCode.ENTER)) {
                 try {
@@ -152,23 +209,20 @@ public class VtxScanner extends Application {
             }
         });
 
-        VBox vbox = new VBox();
-        vbox.getChildren().addAll(lineChart, stopButton, textField);
-
-        Scene scene = new Scene(vbox, 800, 450);
-        scene.getStylesheets().add("style.css");
-
-        primaryStage.setTitle("VtxScanner");
-        primaryStage.setScene(scene);
-        primaryStage.show();
+        hbox.getChildren().addAll(scanButton, leftButton, textField, rightButton);
+        return hbox;
     }
 
-    private void initSerial() {
+    private NRSerialPort serial;
+    private SerialReader reader;
+    private SerialWriter writer;
+
+    private void connect() {
         if (isVerbose()) {
-            System.out.println("[SerialPort] port=" + port + ", baudRate=" + baudRate);
+            System.out.println("[SerialPort] connecting ... port=" + port + ", baudRate=" + baudRate);
         }
 
-        NRSerialPort serial = new NRSerialPort(port, baudRate);
+        serial = new NRSerialPort(port, baudRate);
         serial.connect();
 
         serial.getSerialPortInstance().disableReceiveTimeout();
@@ -178,11 +232,39 @@ public class VtxScanner extends Application {
         OutputStream out = serial.getOutputStream();
 
         BlockingQueue<String> queue = new LinkedBlockingQueue<>(1);
-        writer = new SerialWriter(out, queue);
-        SerialReader reader = new SerialReader(in, queue);
 
-        new Thread(writer).start();
-        new Thread(reader).start();
+        writer = new SerialWriter(out, queue);
+        reader = new SerialReader(in, queue);
+
+        reader.start();
+        writer.start();
+
+        if (isVerbose()) {
+            System.out.println("[SerialPort] connected ");
+        }
+    }
+
+    private void disconnect() {
+        if (isVerbose()) {
+            System.out.println("[SerialPort] disconnect ...");
+        }
+
+        reader.markStop();
+        writer.markStop();
+
+        try {
+            reader.join();
+            writer.join();
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+
+        serial.disconnect();
+        serial = null;
+
+        if (isVerbose()) {
+            System.out.println("[SerialPort] disconnected ");
+        }
     }
 
 }

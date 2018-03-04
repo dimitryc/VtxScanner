@@ -1,15 +1,18 @@
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.TimeUnit;
 
-class SerialWriter implements Runnable {
+class SerialWriter extends Thread {
 
     private OutputStream out;
     private BlockingQueue<String> queue;
 
-    private volatile boolean isStopped = true;
+    private volatile boolean scan = false;
+    private volatile boolean exit = false;
 
-    private int currentFreq = VtxScanner.MIN_FREQ;
+    private volatile int currentFreq =
+            VtxScanner.MIN_FREQ + (VtxScanner.MAX_FREQ - VtxScanner.MIN_FREQ) / 2;
 
     SerialWriter(OutputStream out, BlockingQueue<String> queue) {
         this.out = out;
@@ -18,27 +21,30 @@ class SerialWriter implements Runnable {
 
     @Override
     public void run() {
-        while (true) {
-            while (isStopped) {
-                try {
-                    Thread.sleep(200);
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-            }
-
+        while (!exit) {
             sendMessage();
-            currentFreq += 2;
-            if (currentFreq > VtxScanner.MAX_FREQ) {
-                currentFreq = VtxScanner.MIN_FREQ;
+            if (scan) {
+                incrementFrequency();
             }
+        }
+
+        try {
+            out.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        if (VtxScanner.isVerbose()) {
+            System.out.println("[SerialWriter] exiting");
         }
     }
 
-    private void sendMessage() {
+    private synchronized void sendMessage() {
         String message = Integer.toString(currentFreq);
         try {
-            queue.put(Integer.toString(currentFreq));
+            if (!queue.offer(message, 1, TimeUnit.SECONDS)) {
+                queue.clear();
+                return;
+            }
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
@@ -54,23 +60,42 @@ class SerialWriter implements Runnable {
         }
     }
 
-    public void stop() {
-        isStopped = true;
+    public void scan(boolean scan) {
+        this.scan = scan;
     }
 
-    public void resume() {
-        isStopped = false;
-    }
-
-    void setCurrentFreq(int freq) {
+    synchronized void setCurrentFreq(int freq) {
         if (freq < VtxScanner.MIN_FREQ || freq > VtxScanner.MAX_FREQ) {
             System.out.println("invalid freq value "+freq);
             return;
         }
 
-        if (isStopped) {
-            this.currentFreq = freq;
-            sendMessage();
+        this.currentFreq = freq;
+    }
+
+    private synchronized void incrementFrequency() {
+        currentFreq += 2;
+        if (currentFreq > VtxScanner.MAX_FREQ) {
+            currentFreq = VtxScanner.MIN_FREQ;
         }
+    }
+
+    private synchronized void decrementFrequency() {
+        currentFreq -= 2;
+        if (currentFreq < VtxScanner.MIN_FREQ) {
+            currentFreq = VtxScanner.MAX_FREQ;
+        }
+    }
+
+    void left() {
+        decrementFrequency();
+    }
+
+    void right() {
+        incrementFrequency();
+    }
+
+    void markStop() {
+        exit = true;
     }
 }

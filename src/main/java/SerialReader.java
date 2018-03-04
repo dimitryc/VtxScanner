@@ -1,13 +1,12 @@
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.util.concurrent.BlockingQueue;
 
-class SerialReader implements Runnable {
+class SerialReader extends Thread {
 
     private BufferedReader br;
     private BlockingQueue<String> queue;
+
+    private volatile boolean exit = false;
 
     SerialReader(InputStream in, BlockingQueue<String> queue) {
         this.br = new BufferedReader(new InputStreamReader(in));
@@ -46,7 +45,7 @@ class SerialReader implements Runnable {
 
     @Override
     public void run() {
-        while (true) {
+        while (!exit) {
             try {
                 if (readMessage()) {
                     VtxScanner.updateChart(freq, rssi);
@@ -55,5 +54,18 @@ class SerialReader implements Runnable {
                 e.printStackTrace();
             }
         }
+
+        try {
+            br.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        if (VtxScanner.isVerbose()) {
+            System.out.println("[SerialReader] exiting");
+        }
+    }
+
+    void markStop() {
+        exit = true;
     }
 }
