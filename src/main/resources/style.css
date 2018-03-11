@@ -1,7 +1,13 @@
 .default-color0.chart-series-line {
     -fx-stroke: transparent;
 }
+
 .default-color1.chart-series-line {
+    -fx-stroke: grey;
+    -fx-stroke-width: 2px;
+}
+
+.default-color2.chart-series-line {
     -fx-stroke: grey;
     -fx-stroke-width: 2px;
 }
@@ -11,7 +17,14 @@
     -fx-background-radius: 3px;
     -fx-padding: 3px;
 }
+
 .default-color1.chart-line-symbol {
+    -fx-background-color: grey;
+    -fx-background-radius: 2px;
+    -fx-padding: 2px;
+}
+
+.default-color2.chart-line-symbol {
     -fx-background-color: grey;
     -fx-background-radius: 2px;
     -fx-padding: 2px;

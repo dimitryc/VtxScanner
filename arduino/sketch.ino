@@ -162,9 +162,20 @@ void setup() {
   delay(MIN_TUNE_TIME);
 }
 
+int currentFreq;
+const uint16_t NUMBER_OF_READS = 10;
+
 int measureRssi(uint16_t freq) {
-  setModuleFrequency(freq);  
-  return analogRead(rssiPin);
+  if (currentFreq != freq) {
+    currentFreq = freq;
+    setModuleFrequency(freq);
+  }
+  uint16_t rssiValue = 0;
+  uint8_t i;
+  for (i = 0; i < NUMBER_OF_READS; i++) {
+    rssiValue += analogRead(rssiPin);
+  }
+  return rssiValue /= NUMBER_OF_READS;
 }
 
 String data;

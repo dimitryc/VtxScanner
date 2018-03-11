@@ -25,6 +25,8 @@ public class VtxScanner extends Application {
     private static int baudRate = 115200;
     private static boolean verbose = false;
 
+    private static int THRESHOLD = 100;
+
     static boolean isVerbose() {
         return verbose;
     }
@@ -49,20 +51,86 @@ public class VtxScanner extends Application {
             series1 = new XYChart.Series<>();
     private final static XYChart.Series<Number, Number>
             series2 = new XYChart.Series<>();
+    private final static XYChart.Series<Number, Number>
+            series3 = new XYChart.Series<>();
 
     private final static Map<Number, XYChart.Data<Number, Number>>
             freqToXYDataMap = new HashMap<>();
 
     private static boolean verticalLineCreated;
-    private static XYChart.Data<Number, Number> verticalLineTop;
+    private static XYChart.Data<Number, Number> verticalLineTop = null;
     private static XYChart.Data<Number, Number> verticalLineBottom = null;
+
+    private static boolean noiseLineCreated;
+    private static XYChart.Data<Number, Number> noiseLineLeft = null;
+    private static XYChart.Data<Number, Number> noiseLineRight = null;
 
     public static void updateChart(final int freq, final int rssi) {
         Platform.runLater(() -> {
             updateMainLine(freq, rssi);
             updateVerticalLine(freq, rssi);
             updateLabels(freq, rssi);
+            updateNoiseLine(freq, rssi);
+
+            checkPeak(freq, rssi);
         });
+    }
+
+    private static boolean stopedAtPeak = false;
+
+    private static boolean peakEntered = false;
+    private static int peakEnteredFreq;
+
+    private static boolean peakExited = false;
+    private static int peakExitedFreq;
+
+    // check if we found a peak
+    private static void checkPeak(int freq, int rssi) {
+        int currentNumber = freqToXYDataMap.size();
+        int neededNumber = (MAX_FREQ - MIN_FREQ) / FREQ_DIFF;
+
+        if (currentNumber < neededNumber-1) {
+            return;
+        }
+
+        if (!scanButton.isSelected()) {
+            return;
+        }
+
+        if (stopedAtPeak) {
+            if (rssi < minRssi + THRESHOLD) {
+                peakEntered = false;
+                peakExited = false;
+                stopedAtPeak = false;
+            }
+            return;
+        }
+
+        if (!peakEntered && rssi > minRssi + THRESHOLD) {
+            peakEntered = true;
+            peakEnteredFreq = freq;
+            System.out.println("Entered peak at "+freq);
+            return;
+        }
+
+        if (peakEntered && rssi < minRssi + THRESHOLD) {
+            peakExited = true;
+            peakExitedFreq = freq;
+            System.out.println("Exited peak at "+freq);
+            int peakFreq = peakEnteredFreq + (peakExitedFreq - peakEnteredFreq) / 2;
+            peakFreq = peakFreq - peakFreq % 2;
+            stopAtPeak(peakFreq);
+        }
+    }
+
+    private static void stopAtPeak(int peakFreq) {
+        System.out.println("Stop peak at "+peakFreq);
+        writer.scan(false);
+        scanButton.setText("Start");
+        scanButton.setSelected(false);
+
+        stopedAtPeak = true;
+        writer.setCurrentFreq(peakFreq);
     }
 
     private static void updateMainLine(int freq, int rssi) {
@@ -74,9 +142,11 @@ public class VtxScanner extends Application {
         } else {
             xyData.setYValue(rssi);
         }
+        Tooltip.install(xyData.getNode(), new Tooltip("Freq: "+freq+", rssi: "+rssi));
     }
 
     private static int maxRssi = 0;
+    private static int minRssi = 0;
 
     private static void updateVerticalLine(int freq, int rssi) {
         maxRssi = Math.max(maxRssi, rssi);
@@ -93,6 +163,25 @@ public class VtxScanner extends Application {
 
             verticalLineBottom.setXValue(freq);
             verticalLineBottom.setYValue(0);
+        }
+    }
+
+    private static void updateNoiseLine(int freq, int rssi) {
+        if (minRssi == 0) {
+            minRssi = rssi;
+        } else {
+            minRssi = Math.min(minRssi, rssi);
+        }
+        if (!noiseLineCreated) {
+            noiseLineCreated = true;
+            noiseLineLeft = new XYChart.Data<>(MIN_FREQ, minRssi);
+            noiseLineRight = new XYChart.Data<>(MAX_FREQ, minRssi);
+
+            series3.getData().add(noiseLineLeft);
+            series3.getData().add(noiseLineRight);
+        } else {
+            noiseLineLeft.setYValue(minRssi);
+            noiseLineRight.setYValue(minRssi);
         }
     }
 
@@ -116,6 +205,8 @@ public class VtxScanner extends Application {
     public static int MIN_FREQ = 5600;
     public static int MAX_FREQ = 6000;
 
+    public static int FREQ_DIFF = 2;
+
     private void initUI(Stage primaryStage) {
         final NumberAxis xAxis = new NumberAxis(MIN_FREQ, MAX_FREQ, 100);
         final NumberAxis yAxis = new NumberAxis();
@@ -125,9 +216,11 @@ public class VtxScanner extends Application {
 
         series1.setName("Frequency");
         series2.setName("Current");
+        series3.setName("Noise");
 
         lineChart.getData().add(series1);
         lineChart.getData().add(series2);
+        lineChart.getData().add(series3);
 
         HBox controlBox = initControlBox();
         controlBox.setDisable(true);
@@ -148,6 +241,7 @@ public class VtxScanner extends Application {
 
     private static Label rssiLabel;
     private static TextField textField;
+    private static ToggleButton scanButton;
 
     private HBox initConnectBox(HBox controlBox) {
         HBox hbox = new HBox();
@@ -180,7 +274,7 @@ public class VtxScanner extends Application {
     private HBox initControlBox() {
         HBox hbox = new HBox();
 
-        final ToggleButton scanButton = new ToggleButton("Scan");
+        scanButton = new ToggleButton("Scan");
         scanButton.setOnAction(event -> {
             if (scanButton.isSelected()) {
                 writer.scan(true);
@@ -214,8 +308,8 @@ public class VtxScanner extends Application {
     }
 
     private NRSerialPort serial;
-    private SerialReader reader;
-    private SerialWriter writer;
+    private static SerialReader reader;
+    private static SerialWriter writer;
 
     private void connect() {
         if (isVerbose()) {

@@ -74,14 +74,14 @@ class SerialWriter extends Thread {
     }
 
     private synchronized void incrementFrequency() {
-        currentFreq += 2;
+        currentFreq += VtxScanner.FREQ_DIFF;
         if (currentFreq > VtxScanner.MAX_FREQ) {
             currentFreq = VtxScanner.MIN_FREQ;
         }
     }
 
     private synchronized void decrementFrequency() {
-        currentFreq -= 2;
+        currentFreq -= VtxScanner.FREQ_DIFF;
         if (currentFreq < VtxScanner.MIN_FREQ) {
             currentFreq = VtxScanner.MAX_FREQ;
         }
