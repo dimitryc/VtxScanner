@@ -1,7 +1,31 @@
-#define spiDataPin 10
-#define slaveSelectPin 11
-#define spiClockPin 12
+#define LEONARDO 100
+#define PRO_MINI 101
 
+#define BOARD LEONARDO
+//#define BOARD PRO_MINI
+
+//#define USE_FAST_PINS
+
+#define spiDelay 1
+
+#define rssiPin 3
+
+#if BOARD == PRO_MINI
+  #define spiDataPin 10
+  #define slaveSelectPin 11
+  #define spiClockPin 12
+  
+#elif BOARD == LEONARDO
+  #define spiDataPin 10
+  #define slaveSelectPin 16
+  #define spiClockPin 14
+  
+#else
+  #error Unknow board BOARD
+#endif
+
+
+#if defined USE_FAST_PINS && BOARD == PRO_MINI 
 #define portOfPin(P)\
   (((P)>=0&&(P)<8)?&PORTD:(((P)>7&&(P)<14)?&PORTB:&PORTC))
 #define ddrOfPin(P)\
@@ -21,6 +45,11 @@
 #define isLow(P)((*(pinOfPin(P))& pinMask(P))==0)
 #define digitalState(P)((uint8_t)isHigh(P))
 
+#else
+  #define digitalLow(P) digitalWrite((P), LOW)
+  #define digitalHigh(P) digitalWrite((P), HIGH)
+#endif
+
 // rx5808 module needs >30ms to tune.
 #define MIN_TUNE_TIME 30
 
@@ -33,40 +62,40 @@ void setupSPIpins() {
 
 void SERIAL_SENDBIT1() {
     digitalLow(spiClockPin);
-    delayMicroseconds(1);
+    delayMicroseconds(spiDelay);
 
     digitalHigh(spiDataPin);
-    delayMicroseconds(1);
+    delayMicroseconds(spiDelay);
     digitalHigh(spiClockPin);
-    delayMicroseconds(1);
+    delayMicroseconds(spiDelay);
 
     digitalLow(spiClockPin);
-    delayMicroseconds(1);
+    delayMicroseconds(spiDelay);
 }
 
 void SERIAL_SENDBIT0() {
     digitalLow(spiClockPin);
-    delayMicroseconds(1);
+    delayMicroseconds(spiDelay);
 
     digitalLow(spiDataPin);
-    delayMicroseconds(1);
+    delayMicroseconds(spiDelay);
     digitalHigh(spiClockPin);
-    delayMicroseconds(1);
+    delayMicroseconds(spiDelay);
 
     digitalLow(spiClockPin);
-    delayMicroseconds(1);
+    delayMicroseconds(spiDelay);
 }
 
 void SERIAL_ENABLE_LOW() {
-    delayMicroseconds(1);
+    delayMicroseconds(spiDelay);
     digitalLow(slaveSelectPin);
-    delayMicroseconds(1);
+    delayMicroseconds(spiDelay);
 }
 
 void SERIAL_ENABLE_HIGH() {
-    delayMicroseconds(1);
+    delayMicroseconds(spiDelay);
     digitalHigh(slaveSelectPin);
-    delayMicroseconds(1);
+    delayMicroseconds(spiDelay);
 }
 
 uint16_t setModuleFrequency(uint16_t frequency) {
@@ -84,24 +113,30 @@ uint16_t setModuleFrequency(uint16_t frequency) {
     // A0=0, A1=0, A2=0, A3=1, RW=0, D0-19=0
     cli();
     SERIAL_ENABLE_HIGH();
-    delayMicroseconds(1);
+    delayMicroseconds(spiDelay);
     SERIAL_ENABLE_LOW();
 
+    // Register 0x0
     SERIAL_SENDBIT0();
     SERIAL_SENDBIT0();
     SERIAL_SENDBIT0();
+    SERIAL_SENDBIT0();
+
+    // Write command
     SERIAL_SENDBIT1();
 
-    SERIAL_SENDBIT0();
-
     // remaining zeros
-    for (i = 20; i > 0; i--) {
+    for (i = 3; i > 0; i--) {
+        SERIAL_SENDBIT0();
+    }
+    SERIAL_SENDBIT1();
+    for (i = 16; i > 0; i--) {
         SERIAL_SENDBIT0();
     }
 
     // Clock the data in
     SERIAL_ENABLE_HIGH();
-    delayMicroseconds(1);
+    delayMicroseconds(spiDelay);
     SERIAL_ENABLE_LOW();
 
     // Second is the channel data from the lookup table
@@ -140,7 +175,7 @@ uint16_t setModuleFrequency(uint16_t frequency) {
 
     // Finished clocking data in
     SERIAL_ENABLE_HIGH();
-    delayMicroseconds(1);
+    delayMicroseconds(spiDelay);
 
     digitalLow(slaveSelectPin);
     digitalLow(spiClockPin);
@@ -151,8 +186,6 @@ uint16_t setModuleFrequency(uint16_t frequency) {
     
     return frequency;
 }
-
-const int rssiPin = 3;
 
 void setup() {
   // put your setup code here, to run once:
